@@ -82,6 +82,23 @@ Saved CSVs in current directory:
   shimastream_opponent_breakdown_20250907-013524.csv
 ```
 
+**IMPORTANT:** GPT thinks it's noise anyway. Didn't check though
+
+Using your overall strength as baseline and each band’s avg_opp, the Elo model predicts the following scores; compare to what you observed:
+
+Expected vs observed (Elo logistic), z-scores
+
+* 500 (N=94, avg_opp 2542.4): expected 0.619, observed 0.596 → z = −0.47σ
+95% CI for perf ≈ 2609.8 ± 72 Elo
+* 600 (N=41, avg_opp 2637.1): expected 0.485, observed 0.439 → z = −0.60σ
+95% CI ≈ 2594.5 ± 106 Elo
+* 700 (N=54, avg_opp 2732.5): expected 0.353, observed 0.454 → z = +1.55σ
+95% CI ≈ 2700.3 ± 97 Elo
+* 800+ (N=17, avg_opp 2844.3): expected 0.223, observed 0.088 → z = −1.33σ
+95% CI ≈ 2438.6 ± 199 Elo
+
+Conclusion: none of the bands reaches |z| ≥ 2, so the 700 bump and 800+ dip are not statistically significant with these sample sizes.
+
 ### Requirements
 - Python 3.7+
 - pandas
