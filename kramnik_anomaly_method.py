@@ -388,10 +388,11 @@ def normalize_name_for_matching(name: str) -> str:
     # Remove common prefixes/suffixes and normalize
     name = name.lower().strip()
     
-    # Remove titles (both with and without spaces)
+    # Remove titles (both with and without spaces) - use word boundaries to avoid partial matches
     titles = ["gm", "im", "fm", "cm", "wgm", "wim", "wfm", "wcm", "grandmaster", "international master", "fide master", "candidate master"]
     for title in titles:
-        name = name.replace(title, "").strip()
+        # Use word boundaries to ensure we only match complete words
+        name = re.sub(r'\b' + re.escape(title) + r'\b', '', name).strip()
     
     # Remove country codes in parentheses
     name = re.sub(r'\([a-z]{2,3}\)', '', name).strip()

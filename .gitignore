@@ -1,0 +1,46 @@
+# Generated CSV files
+*.csv
+
+# Generated JSON mapping files
+*_fide_mapping_*.json
+*_username_mapping_*.json
+
+# Log files
+log*
+*.log
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+
+# Archive files (if they contain generated data)
+*.zip
+*.tar.gz
+*.rar
+
+# Large data files
+players_list_foa.txt
+
