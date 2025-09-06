@@ -19,7 +19,7 @@ This script analyzes a chess player's performance against opponents grouped by r
 
 #### Basic Analysis
 ```bash
-python3 kramnik_anomaly_method.py --player shimastream --since 2024-01-01 --until 2024-12-31 --titled-tuesday --use-fide
+python3 kramnik_anomaly_method.py --player shimastream --since 2023-08-01 --until 2025-09-01 --titled-tuesday --use-fide
 ```
 
 #### Parameters
