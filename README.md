@@ -2,6 +2,88 @@
 
 A statistical analysis tool for analyzing chess player performance against different rating bands, inspired by Vladimir Kramnik's approach to detecting rating anomalies.
 
+## Interesting Statistics
+
+### Initial reproduction
+My primary goal was to reproduce analysis on `shimastream` and I succeeded:
+
+```
+Performance vs bands:
+band  games  score  avg_opp   perf
+ 500     94   56.0   2542.4 2609.8
+ 600     41   18.0   2637.1 2594.5
+ 700     54   24.5   2732.5 2700.3
+800+     17    1.5   2844.3 2438.6
+```
+
+* "Band" means buckets by FIDE Blitz ratings: 2500-2600, 2600-2700, 2700-2800, 2800+. Originally "500" bucket wasn't taken but I added it to get more observations.
+* "Games" means number of Titled Tuesday games in each bucket.
+* "Score" is total score where +1 is a win, +0.5 is a draw, 0 is loss.
+* "avg_opp" is the average FIDE rating of opponent over all games.
+* "perf" is the evaluated rating of the measured player, based on Elo formula and FIDE ratings of opponents.
+
+The original claim was that performance against 2700-2800 bucket was higher than performance against 2600-2700. Indeed, 2594.5 deviates from 2700.3 by ~100.
+
+GPT thinks this is noise anyway and +-50 fluctuations are within standard deviation. I tried to confirm this by assuming that single game result is a coin toss (Bernoulli random variable) with fixed probability of winning, but for that case deviation of 50 elo is actually on the significant side if we have sample of ~50 games.
+
+However, I think that we cannot make this assumption, probably because the probability of winning every single game is very different in every case. This is supported by the variances which are similarly high for other players with similar FIDE blitz rating.
+
+### More examples
+
+#### Etienne Bacrot `baki83`
+
+```
+band  games  score  avg_opp   perf
+ 500     63   34.0   2560.1 2587.8
+ 600     48   12.5   2635.9 2454.5
+ 700     59   18.0   2729.4 2586.4
+800+     17    4.0   2838.2 2633.5
+```
+
+Similarly, one can claim that the 100 elo perf difference between buckets "600" and "700" is unexpected.
+
+#### Sergei Zhigalko `Zhigalko_Sergei`
+
+```
+band  games  score  avg_opp   perf
+ 500    160   82.5   2547.9 2558.8
+ 600     89   31.5   2642.2 2537.7
+ 700    148   44.0   2739.5 2590.1
+800+     40    6.5   2844.0 2559.2
+```
+
+This is example of stable performance, for completeness. However, the sample is **much higher**, which explains why every perf is closer to mean.
+
+#### José Carlos Ibarra Jerez (`jcibarra`)
+
+```
+band  games  score  avg_opp   perf
+ 500    105   57.5   2549.3 2582.5
+ 600     51   26.5   2636.0 2649.6
+ 700     66   14.0   2734.4 2506.4
+800+     23    2.0   2832.7 2424.3
+```
+
+The opposite case: 140 elo perf difference between buckets "600" and "700". One could say that it means that the player plays much stronger against 2600 players.
+
+#### Vladimir Kramnik (`vladimirkramnik`)
+
+```
+band  games  score  avg_opp   perf
+ 500     49   29.5   2546.1 2618.1
+ 600     21    9.5   2644.3 2611.1
+ 700     33   11.0   2737.3 2616.9
+800+     11    2.5   2833.8 2621.2
+```
+
+Surprisingly, here the performance is **extremely stable**. I didn't see such low variance for other samples! I'd speculate it really depends on player' style.
+
+All these samples were taken by just taking random players around ~2595 rating for which there was some reasonable amount of Titled Tuesday games.
+
+### Conclusion
+
+The deviations of 100 Elo on different buckets are common.
+
 ## Main Script: `kramnik_anomaly_method.py`
 
 ### Overview
@@ -38,66 +120,6 @@ The script generates:
 - **Sample games CSV**: All analyzed games with metadata
 - **Band summary CSV**: Aggregated performance by rating band
 
-### Example Output
-```
-Performance vs bands:
-band  games  score  avg_opp   perf
- 500     94   56.0   2542.4 2609.8
- 600     41   18.0   2637.1 2594.5
- 700     54   24.5   2732.5 2700.3
-800+     17    1.5   2844.3 2438.6
-Adding FIDE ratings to opponent breakdown...
-Saved FIDE mapping to shimastream_fide_mapping_20250907-013524.json
-Saved username-to-name mapping to shimastream_username_mapping_20250907-013524.json
-Found FIDE ratings for 100 out of 100 opponents
-FIDE rating range: 2501.0 - 2881.0
-Average FIDE rating: 2606.0
-
-Top opponents by games (first 20):
-                 opp  games  score  avg_opp  score_pct  fide_rating          real_name
-            jefferyx      8    4.5   2703.0       56.2       2703.0      Jeffery Xiong
-           mishanick      8    3.5   2705.0       43.8       2705.0     Aleksei Sarana
-              hikaru      8    0.5   2838.0        6.2       2838.0    Hikaru Nakamura
-          scarabee43      7    4.5   2510.0       64.3       2510.0      Marco Materia
-   oleksandr_bortnyk      6    4.5   2793.0       75.0       2793.0  Oleksandr Bortnyk
-  polish_fighter3000      6    1.0   2752.0       16.7       2752.0 Jan-Krzysztof Duda
-       magnuscarlsen      5    0.0   2881.0        0.0       2881.0     Magnus Carlsen
-    vladislavkovalev      4    4.0   2553.0      100.0       2553.0  Vladislav Kovalev
-              baki83      4    2.0   2590.0       50.0       2590.0     Etienne Bacrot
-fairchess_on_youtube      4    2.0   2714.0       50.0       2714.0   Dmitry Andreikin
-           vi_pranav      4    1.5   2606.0       37.5       2606.0           Pranav V
-              denlaz      4    1.0   2609.0       25.0       2609.0      Denis Lazavik
-            parhamov      4    0.5   2703.0       12.5       2703.0 Parham Maghsoodloo
-        gmakobianstl      3    3.0   2512.0      100.0       2512.0   Varuzhan Akobian
-                msb2      3    3.0   2635.0      100.0       2635.0  Matthias Bluebaum
-          durarbayli      3    2.0   2570.0       66.7       2570.0   Vasif Durarbayli
-            grischuk      3    2.0   2676.0       66.7       2676.0 Alexander Grischuk
-    danielnaroditsky      3    1.5   2729.0       50.0       2729.0  Daniel Naroditsky
-      ghandeevam2003      3    1.5   2750.0       50.0       2750.0     Arjun Erigaisi
-          igor_lysyj      3    1.0   2517.0       33.3       2517.0         Igor Lysyj
-
-Saved CSVs in current directory:
-  shimastream_blitz_sample_20250907-013524.csv
-  shimastream_band_summary_20250907-013524.csv
-  shimastream_opponent_breakdown_20250907-013524.csv
-```
-
-**IMPORTANT:** GPT thinks it's noise anyway. Didn't check though
-
-Using your overall strength as baseline and each band’s avg_opp, the Elo model predicts the following scores; compare to what you observed:
-
-Expected vs observed (Elo logistic), z-scores
-
-* 500 (N=94, avg_opp 2542.4): expected 0.619, observed 0.596 → z = −0.47σ
-95% CI for perf ≈ 2609.8 ± 72 Elo
-* 600 (N=41, avg_opp 2637.1): expected 0.485, observed 0.439 → z = −0.60σ
-95% CI ≈ 2594.5 ± 106 Elo
-* 700 (N=54, avg_opp 2732.5): expected 0.353, observed 0.454 → z = +1.55σ
-95% CI ≈ 2700.3 ± 97 Elo
-* 800+ (N=17, avg_opp 2844.3): expected 0.223, observed 0.088 → z = −1.33σ
-95% CI ≈ 2438.6 ± 199 Elo
-
-Conclusion: none of the bands reaches |z| ≥ 2, so the 700 bump and 800+ dip are not statistically significant with these sample sizes.
 
 ### Requirements
 - Python 3.7+
