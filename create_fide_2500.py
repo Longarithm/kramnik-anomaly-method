@@ -5,6 +5,76 @@ Script to correctly parse FIDE ratings data and create a clean JSON file with 25
 
 import json
 import re
+import os
+import subprocess
+import sys
+
+def download_fide_players_list(verbose: bool = False) -> bool:
+    """Download FIDE players list if foa.txt doesn't exist."""
+    fide_file = "players_list_foa.txt"
+    
+    if os.path.exists(fide_file):
+        if verbose:
+            print(f"FIDE players list already exists: {fide_file}")
+        return True
+    
+    print("FIDE players list not found. Downloading from FIDE website...")
+    
+    try:
+        # Download the zip file
+        download_cmd = [
+            "curl", "-s", 
+            "http://ratings.fide.com/download/players_list.zip", 
+            "-o", "fide_players.zip"
+        ]
+        
+        if verbose:
+            print(f"Running: {' '.join(download_cmd)}")
+        
+        result = subprocess.run(download_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"Error downloading FIDE players list: {result.stderr}")
+            return False
+        
+        if not os.path.exists("fide_players.zip"):
+            print("Download failed: fide_players.zip not created")
+            return False
+        
+        print("Download successful. Extracting...")
+        
+        # Extract the zip file
+        extract_cmd = ["unzip", "-o", "fide_players.zip"]
+        if verbose:
+            print(f"Running: {' '.join(extract_cmd)}")
+        
+        result = subprocess.run(extract_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"Error extracting zip file: {result.stderr}")
+            return False
+        
+        # Check if foa.txt was extracted
+        if not os.path.exists(fide_file):
+            print(f"Error: {fide_file} not found after extraction")
+            print("Available files:")
+            for f in os.listdir("."):
+                if f.endswith(".txt"):
+                    print(f"  {f}")
+            return False
+        
+        # Clean up the zip file
+        try:
+            os.remove("fide_players.zip")
+            if verbose:
+                print("Cleaned up fide_players.zip")
+        except Exception as e:
+            print(f"Warning: Could not remove fide_players.zip: {e}")
+        
+        print(f"Successfully downloaded and extracted {fide_file}")
+        return True
+        
+    except Exception as e:
+        print(f"Error downloading FIDE players list: {e}")
+        return False
 
 def parse_fide_ratings_correct(data: str, min_rating: int = 2500) -> dict:
     """Parse FIDE ratings data correctly using fixed-width column positions."""
@@ -108,8 +178,16 @@ def normalize_fide_name(name: str) -> str:
     return name.lower().replace(' ', '_').replace(',', '')
 
 def main():
-    # Read the raw FIDE data file
+    # Check if FIDE data file exists, download if needed
     fide_file = "players_list_foa.txt"
+    
+    # Try to download if file doesn't exist
+    if not os.path.exists(fide_file):
+        print("FIDE players list not found. Attempting to download...")
+        if not download_fide_players_list(verbose=True):
+            print("Failed to download FIDE players list. Please ensure you have internet access and curl/unzip installed.")
+            return 1
+    
     try:
         with open(fide_file, 'r', encoding='utf-8', errors='ignore') as f:
             data = f.read()
@@ -118,24 +196,27 @@ def main():
         fide_data_2500 = parse_fide_ratings_correct(data, 2500)
         
         if fide_data_2500:
+            # Sort the data by rating in descending order
+            sorted_fide_data = dict(sorted(fide_data_2500.items(), key=lambda x: x[1], reverse=True))
+            
             # Save to JSON file
             output_file = "fide_blitz_ratings_2500+.json"
             with open(output_file, 'w') as f:
-                json.dump(fide_data_2500, f, indent=2)
-            print(f"Saved {len(fide_data_2500)} FIDE ratings to {output_file}")
+                json.dump(sorted_fide_data, f, indent=2)
+            print(f"Saved {len(sorted_fide_data)} FIDE ratings to {output_file} (sorted by rating)")
             
             # Show some statistics
-            ratings = list(fide_data_2500.values())
+            ratings = list(sorted_fide_data.values())
             print(f"Rating range: {min(ratings)} - {max(ratings)}")
             print(f"Average rating: {sum(ratings) / len(ratings):.1f}")
             
-            # Show some examples
-            print("\nSample entries:")
-            for i, (name, rating) in enumerate(list(fide_data_2500.items())[:10]):
+            # Show some examples (top 10 highest rated)
+            print("\nTop 10 highest rated players:")
+            for i, (name, rating) in enumerate(list(sorted_fide_data.items())[:10]):
                 print(f"  {name}: {rating}")
                 
             # Check for any remaining high ratings
-            high_ratings = [(name, rating) for name, rating in fide_data_2500.items() if rating > 3000]
+            high_ratings = [(name, rating) for name, rating in sorted_fide_data.items() if rating > 3000]
             if high_ratings:
                 print(f"\nHigh ratings (>3000): {len(high_ratings)}")
                 for name, rating in sorted(high_ratings, key=lambda x: x[1], reverse=True)[:5]:

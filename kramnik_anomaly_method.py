@@ -9,6 +9,7 @@ import os
 import sys
 import time
 import re
+import subprocess
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -329,6 +330,73 @@ def perf_rating(score: float, n: int, avg_opp: float) -> float:
         return avg_opp + 800.0
     return avg_opp + 400.0 * math.log10(score / (n - score))
 
+def download_fide_players_list(verbose: bool = False) -> bool:
+    """Download FIDE players list if foa.txt doesn't exist."""
+    fide_file = "players_list_foa.txt"
+    
+    if os.path.exists(fide_file):
+        if verbose:
+            print(f"FIDE players list already exists: {fide_file}")
+        return True
+    
+    print("FIDE players list not found. Downloading from FIDE website...")
+    
+    try:
+        # Download the zip file
+        download_cmd = [
+            "curl", "-s", 
+            "http://ratings.fide.com/download/players_list.zip", 
+            "-o", "fide_players.zip"
+        ]
+        
+        if verbose:
+            print(f"Running: {' '.join(download_cmd)}")
+        
+        result = subprocess.run(download_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"Error downloading FIDE players list: {result.stderr}")
+            return False
+        
+        if not os.path.exists("fide_players.zip"):
+            print("Download failed: fide_players.zip not created")
+            return False
+        
+        print("Download successful. Extracting...")
+        
+        # Extract the zip file
+        extract_cmd = ["unzip", "-o", "fide_players.zip"]
+        if verbose:
+            print(f"Running: {' '.join(extract_cmd)}")
+        
+        result = subprocess.run(extract_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"Error extracting zip file: {result.stderr}")
+            return False
+        
+        # Check if foa.txt was extracted
+        if not os.path.exists(fide_file):
+            print(f"Error: {fide_file} not found after extraction")
+            print("Available files:")
+            for f in os.listdir("."):
+                if f.endswith(".txt"):
+                    print(f"  {f}")
+            return False
+        
+        # Clean up the zip file
+        try:
+            os.remove("fide_players.zip")
+            if verbose:
+                print("Cleaned up fide_players.zip")
+        except Exception as e:
+            print(f"Warning: Could not remove fide_players.zip: {e}")
+        
+        print(f"Successfully downloaded and extracted {fide_file}")
+        return True
+        
+    except Exception as e:
+        print(f"Error downloading FIDE players list: {e}")
+        return False
+
 def assign_band_from_rating(r: Optional[float], use_fide: bool = False) -> Optional[str]:
     if r is None:
         return None
@@ -355,7 +423,7 @@ def assign_band_from_rating(r: Optional[float], use_fide: bool = False) -> Optio
     return None
 
 def download_fide_ratings(min_rating: int = 2500, verbose: bool = False) -> Dict[str, int]:
-    """Load FIDE ratings from the pre-processed JSON file."""
+    """Load FIDE ratings from the pre-processed JSON file, or create it from raw data if needed."""
     fide_cache_file = f"fide_blitz_ratings_{min_rating}+.json"
     
     # Check if we have the pre-processed JSON file
@@ -372,65 +440,130 @@ def download_fide_ratings(min_rating: int = 2500, verbose: bool = False) -> Dict
             if verbose:
                 print(f"Error loading FIDE ratings from {fide_cache_file}: {e}")
             return {}
-    else:
+    
+    # Otherwise, create the file from raw data
+    if verbose:
+        print(f"FIDE ratings file {fide_cache_file} not found. Attempting to create it...")
+    
+    # Try to create the JSON file from raw FIDE data
+    fide_file = "players_list_foa.txt"
+    
+    # Check if raw FIDE data exists, download if needed
+    if not os.path.exists(fide_file):
         if verbose:
-            print(f"FIDE ratings file {fide_cache_file} not found")
+            print("Raw FIDE data not found. Attempting to download...")
+        if not download_fide_players_list(verbose=verbose):
+            if verbose:
+                print("Failed to download FIDE players list.")
+            return {}
+    
+    # Try to parse the raw data and create the JSON file
+    try:
+        with open(fide_file, 'r', encoding='utf-8', errors='ignore') as f:
+            data = f.read()
+        
+        # Parse the FIDE data
+        fide_data = parse_fide_ratings_data(data, min_rating, verbose=verbose)
+        
+        if fide_data:
+            # Sort the data by rating in descending order
+            sorted_fide_data = dict(sorted(fide_data.items(), key=lambda x: x[1], reverse=True))
+            
+            # Save to JSON file for future use
+            with open(fide_cache_file, 'w') as f:
+                json.dump(sorted_fide_data, f, indent=2)
+            if verbose:
+                print(f"Created and saved {len(sorted_fide_data)} FIDE ratings to {fide_cache_file} (sorted by rating)")
+            return sorted_fide_data
+        else:
+            if verbose:
+                print("No FIDE data could be parsed from raw file")
+            return {}
+            
+    except Exception as e:
+        if verbose:
+            print(f"Error processing FIDE data: {e}")
         return {}
 
 def parse_fide_ratings_data(data: str, min_rating: int, verbose: bool = False) -> Dict[str, int]:
-    """Parse FIDE ratings data and return a mapping of names to ratings."""
+    """Parse FIDE ratings data correctly using fixed-width column positions."""
     fide_mapping = {}
     
     if verbose:
-        print("Parsing FIDE ratings data...")
+        print(f"Parsing FIDE ratings data for players with rating >= {min_rating}...")
     
     lines = data.strip().split('\n')
     processed = 0
     
-    for line in lines:
-        parts = line.split()
-        if len(parts) < 2:
+    # Find the header line to determine column positions
+    header_line = None
+    for i, line in enumerate(lines):
+        if "ID Number" in line and "Name" in line:
+            header_line = line
+            break
+    
+    if not header_line:
+        if verbose:
+            print("Could not find header line")
+        return {}
+    
+    # Find column positions
+    name_start = header_line.find("Name")
+    fed_start = header_line.find("Fed")
+    sex_start = header_line.find("Sex")
+    tit_start = header_line.find("Tit")
+    foa_start = header_line.find("FOA")
+    srtng_start = header_line.find("SRtng")
+    rrtng_start = header_line.find("RRtng")
+    brtng_start = header_line.find("BRtng")
+    
+    if verbose:
+        print(f"Column positions: Name={name_start}, Fed={fed_start}, Sex={sex_start}, Tit={tit_start}")
+        print(f"Rating positions: FOA={foa_start}, SRtng={srtng_start}, RRtng={rrtng_start}, BRtng={brtng_start}")
+    
+    # Process each line starting after the header
+    for i, line in enumerate(lines):
+        if i < 2:  # Skip header lines
             continue
             
-        # Check if first part is a FIDE ID (numeric)
-        if parts[0].isdigit():
-            try:
-                fide_id = parts[0]
-                # Find the rating (usually the second numeric value after the ID)
-                std_rating = 0
-                for part in parts[1:]:
-                    if part.isdigit() and int(part) > 1000:  # Rating should be > 1000
-                        std_rating = int(part)
-                        break
-                
-                if std_rating >= min_rating:
-                    # Extract name - it's usually the second part, but we need to handle the format
-                    # FIDE format is typically: ID Name Fed Sex Tit
-                    # We need to find where the name ends and other fields begin
-                    name_parts = []
-                    for i, part in enumerate(parts[1:], 1):
-                        # Stop when we hit a 3-letter country code or single letter (sex)
-                        if len(part) == 3 and part.isalpha() and part.isupper():
-                            break
-                        if len(part) == 1 and part in ['M', 'F']:
-                            break
-                        name_parts.append(part)
-                    
-                    if name_parts:
-                        name = ' '.join(name_parts)
-                        if name and name != '-' and name != '-, -':
-                            # Normalize name for matching
-                            normalized_name = normalize_fide_name(name)
-                            if normalized_name:
-                                fide_mapping[normalized_name] = std_rating
-                                processed += 1
-                                if verbose and processed <= 10:  # Show first 10 matches
-                                    print(f"  Found: {name} -> {std_rating}")
-                
-            except Exception as e:
-                if verbose and processed < 10:
-                    print(f"Error parsing line: {e}")
+        if not line.strip():
+            continue
+            
+        # Check if line starts with a FIDE ID (numeric)
+        if not line[:10].strip().isdigit():
+            continue
+            
+        try:
+            # Extract FIDE ID (first 10 characters)
+            fide_id = line[:10].strip()
+            
+            # Extract name (between Name and Fed columns)
+            if name_start < len(line) and fed_start < len(line):
+                name = line[name_start:fed_start].strip()
+            else:
                 continue
+                
+            if name == '-' or name == '-, -' or not name:
+                continue
+                
+            # Extract blitz rating (BRtng column)
+            if brtng_start < len(line):
+                # BRtng is 5 characters wide
+                brtng_str = line[brtng_start:brtng_start+5].strip()
+                if brtng_str.isdigit():
+                    blitz_rating = int(brtng_str)
+                    if blitz_rating >= min_rating:
+                        # Normalize name for matching
+                        normalized_name = normalize_fide_name(name)
+                        if normalized_name:
+                            fide_mapping[normalized_name] = blitz_rating
+                            processed += 1
+                            if processed <= 10:  # Show first 10 matches
+                                print(f"  Found: {name} -> {blitz_rating} (blitz)")
+                
+        except Exception as e:
+            if processed < 10:
+                print(f"Error parsing line {i}: {e}")
     
     if verbose:
         print(f"Parsed {processed} players with rating >= {min_rating}")
