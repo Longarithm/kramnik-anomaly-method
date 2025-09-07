@@ -20,6 +20,70 @@ from tqdm import tqdm
 BASE = "https://api.chess.com/pub"
 FIDE_BASE = "https://ratings.fide.com"
 
+# Global cache for API responses to avoid redundant network requests
+_api_cache: Dict[str, dict] = {}
+_api_cache_file = "chess_api_cache.json"
+
+def load_api_cache():
+    """Load API cache from file."""
+    global _api_cache
+    if os.path.exists(_api_cache_file):
+        try:
+            with open(_api_cache_file, 'r') as f:
+                _api_cache = json.load(f)
+        except Exception as e:
+            print(f"Warning: Could not load API cache from {_api_cache_file}: {e}")
+            _api_cache = {}
+
+def save_api_cache():
+    """Save API cache to file."""
+    try:
+        with open(_api_cache_file, 'w') as f:
+            json.dump(_api_cache, f, indent=2)
+    except Exception as e:
+        print(f"Warning: Could not save API cache to {_api_cache_file}: {e}")
+
+def clear_api_cache():
+    """Clear the API response cache."""
+    global _api_cache
+    _api_cache.clear()
+    if os.path.exists(_api_cache_file):
+        try:
+            os.remove(_api_cache_file)
+        except Exception as e:
+            print(f"Warning: Could not remove cache file {_api_cache_file}: {e}")
+
+def get_cache_stats():
+    """Get statistics about the API cache."""
+    basic_player_profiles = [url for url in _api_cache.keys() 
+                           if url.startswith(f"{BASE}/player/") 
+                           and not url.endswith("/games/archives") 
+                           and "/games/" not in url]
+    return {
+        'cached_urls': len(_api_cache),
+        'basic_player_profiles': len(basic_player_profiles),
+        'game_archives': len([url for url in _api_cache.keys() if url.endswith("/games/archives")]),
+        'monthly_games': len([url for url in _api_cache.keys() if "/games/" in url and not url.endswith("/games/archives")]),
+        'other_urls': len(_api_cache) - len(basic_player_profiles) - len([url for url in _api_cache.keys() if "/games/" in url]),
+        'urls': list(_api_cache.keys()),
+        'cache_file': _api_cache_file,
+        'cache_file_exists': os.path.exists(_api_cache_file)
+    }
+
+def cleanup_api_cache():
+    """Remove non-basic-player-profile entries from the cache."""
+    global _api_cache
+    basic_player_profiles = {url: data for url, data in _api_cache.items() 
+                           if url.startswith(f"{BASE}/player/") 
+                           and not url.endswith("/games/archives") 
+                           and "/games/" not in url}
+    removed_count = len(_api_cache) - len(basic_player_profiles)
+    _api_cache = basic_player_profiles
+    if removed_count > 0:
+        save_api_cache()
+        print(f"Removed {removed_count} non-basic-player-profile entries from cache")
+    return removed_count
+
 def parse_date(s: str) -> dt.date:
     return dt.datetime.strptime(s, "%Y-%m-%d").date()
 
@@ -36,7 +100,14 @@ def month_range(start: dt.date, end: dt.date) -> List[Tuple[int, int]]:
             cur = cur.replace(month=cur.month + 1)
     return months
 
-def fetch_json(url: str, retries: int = 3, sleep: float = 0.8, verbose: bool = False) -> Optional[dict]:
+def fetch_json(url: str, retries: int = 3, sleep: float = 0.8, verbose: bool = False, use_cache: bool = True) -> Optional[dict]:
+    # Check cache first if enabled and URL is a basic Chess.com player profile (not games/archives)
+    is_basic_player_profile = url.startswith(f"{BASE}/player/") and not url.endswith("/games/archives") and "/games/" not in url
+    if use_cache and is_basic_player_profile and url in _api_cache:
+        if verbose:
+            print(f"  Using cached response for: {url}")
+        return _api_cache[url]
+    
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
@@ -49,7 +120,14 @@ def fetch_json(url: str, retries: int = 3, sleep: float = 0.8, verbose: bool = F
                 print(f"  Status: {r.status_code}")
             if r.status_code == 200:
                 try:
-                    return r.json()
+                    data = r.json()
+                    # Cache successful responses if caching is enabled and URL is a basic Chess.com player profile
+                    if use_cache and is_basic_player_profile:
+                        _api_cache[url] = data
+                        save_api_cache()  # Save to persistent file
+                        if verbose:
+                            print(f"  Cached response for: {url}")
+                    return data
                 except Exception as e:
                     if verbose:
                         print(f"  JSON parse error: {e}")
@@ -780,11 +858,11 @@ def main(argv=None):
         fide_mapping_file = f"{player}_fide_mapping_{ts_label}.json"
         username_mapping_file = f"{player}_username_mapping_{ts_label}.json"
         
-        with open(fide_mapping_file, 'w') as f:
+        with open(os.path.join('data', fide_mapping_file), 'w') as f:
             json.dump(opp_fide_ratings, f, indent=2)
         print(f"Saved FIDE mapping to {fide_mapping_file}")
         
-        with open(username_mapping_file, 'w') as f:
+        with open(os.path.join('data', username_mapping_file), 'w') as f:
             json.dump(username_to_name, f, indent=2)
         print(f"Saved username-to-name mapping to {username_mapping_file}")
         
@@ -797,14 +875,21 @@ def main(argv=None):
     
     print("\nTop opponents by games (first 20):")
     print(cnt.head(20).to_string(index=False))
-    df.to_csv(f"{player}_blitz_sample_{ts_label}.csv", index=False)
-    summary.to_csv(f"{player}_band_summary_{ts_label}.csv", index=False)
-    cnt.to_csv(f"{player}_opponent_breakdown_{ts_label}.csv", index=False)
-    print(f"\nSaved CSVs in current directory:\n"
+    df.to_csv(os.path.join('data', f"{player}_blitz_sample_{ts_label}.csv"), index=False)
+    summary.to_csv(os.path.join('data', f"{player}_band_summary_{ts_label}.csv"), index=False)
+    cnt.to_csv(os.path.join('data', f"{player}_opponent_breakdown_{ts_label}.csv"), index=False)
+    print(f"\nSaved CSVs in data directory:\n"
           f"  {player}_blitz_sample_{ts_label}.csv\n"
           f"  {player}_band_summary_{ts_label}.csv\n"
           f"  {player}_opponent_breakdown_{ts_label}.csv")
     return 0
+
+# Load API cache on module import
+load_api_cache()
+
+# Create data directory if it doesn't exist
+if not os.path.exists('data'):
+    os.makedirs('data')
 
 if __name__ == "__main__":
     sys.exit(main())

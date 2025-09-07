@@ -1,7 +1,9 @@
 # Generated CSV files
-*.csv
+data/
+**/*.csv
 
 # Generated JSON mapping files
+chess_api_cache.json
 *_fide_mapping_*.json
 *_username_mapping_*.json
 
